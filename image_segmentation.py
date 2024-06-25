@@ -1,4 +1,3 @@
-
 import os
 import cv2
 import torch
@@ -8,9 +7,12 @@ from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import transforms
 import matplotlib.pyplot as plt
 import numpy as np
+import mlflow
+import mlflow.pytorch
+from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 import time
 
 class SegmentationDataset(Dataset):
@@ -116,18 +118,35 @@ train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size,
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False)
 
+# Initialize MLflow logger
+mlflow_logger = MLFlowLogger(experiment_name='SegmentationExperiment')
+
+# Initialize model checkpoint callback
+checkpoint_callback = ModelCheckpoint(
+    monitor='val_loss',
+    dirpath='checkpoints',
+    filename='unet-{epoch:02d}-{val_loss:.2f}',
+    save_top_k=3,
+    mode='min'
+)
+
 # Initialize the model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 unet = UNet(in_channels=3, out_channels=5)
 
 # Initialize the PyTorch Lightning trainer
-trainer = pl.Trainer(max_epochs=100, gpus=1 if torch.cuda.is_available() else 0)
+trainer = pl.Trainer(
+    max_epochs=100,
+    gpus=1 if torch.cuda.is_available() else 0,
+    logger=mlflow_logger,
+    callbacks=[checkpoint_callback]
+)
 
 # Train the model
 trainer.fit(unet, train_loader, val_loader)
 
-# Save the model
-torch.save(unet.state_dict(), "unet.pth")
+# Save the model using MLflow
+mlflow.pytorch.log_model(unet, "model")
 
 # Function to preprocess the image
 def preprocess_image(image_path):
